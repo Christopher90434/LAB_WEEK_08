@@ -1,10 +1,14 @@
 package com.example.lab_week_08
 
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.work.Constraints
@@ -17,7 +21,6 @@ import com.example.lab_week_08.worker.SecondWorker
 
 class MainActivity : AppCompatActivity() {
 
-    // Instance WorkManager
     private val workManager = WorkManager.getInstance(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,39 +34,45 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        // Request permission untuk notifikasi (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                    1
+                )
+            }
+        }
+
         Log.d("MainActivity", "MainActivity started")
 
-        // Buat constraint: worker tidak butuh internet (untuk testing)
         val networkConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
             .build()
 
-        // ID yang akan dikirim ke worker
         val id = "001"
 
-        // Buat request untuk FirstWorker
         val firstRequest = OneTimeWorkRequest
             .Builder(FirstWorker::class.java)
             .setConstraints(networkConstraints)
             .setInputData(getIdInputData(FirstWorker.INPUT_DATA_ID, id))
             .build()
 
-        // Buat request untuk SecondWorker
         val secondRequest = OneTimeWorkRequest
             .Builder(SecondWorker::class.java)
             .setConstraints(networkConstraints)
             .setInputData(getIdInputData(SecondWorker.INPUT_DATA_ID, id))
             .build()
 
-        // Eksekusi worker secara berurutan: FirstWorker dulu, baru SecondWorker
         workManager
-            .beginWith(firstRequest)  // Mulai dengan FirstWorker
-            .then(secondRequest)      // Lanjut ke SecondWorker
-            .enqueue()                // Jalankan
+            .beginWith(firstRequest)
+            .then(secondRequest)
+            .enqueue()
 
         Log.d("MainActivity", "Workers enqueued")
 
-        // Observe FirstWorker: pantau status FirstWorker
+        // Observe FirstWorker
         workManager.getWorkInfoByIdLiveData(firstRequest.id)
             .observe(this) { info ->
                 Log.d("MainActivity", "FirstWorker state: ${info.state}")
@@ -72,26 +81,41 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-        // Observe SecondWorker: pantau status SecondWorker
+        // Observe SecondWorker dan launch NotificationService
         workManager.getWorkInfoByIdLiveData(secondRequest.id)
             .observe(this) { info ->
                 Log.d("MainActivity", "SecondWorker state: ${info.state}")
                 if (info.state.isFinished) {
                     showResult("Second process is done")
+                    // Launch NotificationService setelah SecondWorker selesai
+                    launchNotificationService()
                 }
             }
     }
 
-    // Method untuk membuat input data yang dikirim ke worker
     private fun getIdInputData(idKey: String, idValue: String): Data {
         return Data.Builder()
             .putString(idKey, idValue)
             .build()
     }
 
-    // Method untuk menampilkan Toast
     private fun showResult(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         Log.d("MainActivity", message)
+    }
+
+    private fun launchNotificationService() {
+        // Observe tracking completion dari NotificationService
+        NotificationService.trackingCompletion.observe(this) { id ->
+            showResult("Process for Notification Channel ID $id is done!")
+        }
+
+        // Start NotificationService
+        val serviceIntent = Intent(this, NotificationService::class.java).apply {
+            putExtra(NotificationService.EXTRA_ID, "001")
+        }
+
+        ContextCompat.startForegroundService(this, serviceIntent)
+        Log.d("MainActivity", "NotificationService launched")
     }
 }
